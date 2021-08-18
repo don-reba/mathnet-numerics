@@ -30,6 +30,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using MathNet.Numerics.LinearAlgebra;
 using Complex = System.Numerics.Complex;
 
 namespace MathNet.Numerics.Statistics
@@ -378,6 +379,30 @@ namespace MathNet.Numerics.Statistics
         }
 
         /// <summary>
+        /// Estimates the arithmetic sample mean from the enumerable, in a single pass without memoization.
+        /// Returns null if data is empty.
+        /// </summary>
+        /// <param name="stream">Sample stream. No sorting is assumed. All samples must have the same dimensionality.</param>
+        public static Vector<double> Mean(IEnumerable<Vector<double>> stream)
+        {
+            Vector<double> mean = null;
+            double m = 2.0; // double is good for streams of up to 2^52 elements
+            foreach (var d in stream)
+            {
+                if (mean == null)
+                {
+                    mean = d;
+                }
+                else
+                {
+                    mean += (d - mean) / m;
+                    m += 1.0;
+                }
+            }
+            return mean;
+        }
+
+        /// <summary>
         /// Evaluates the geometric mean of the enumerable, in a single pass without memoization.
         /// Returns NaN if data is empty or any entry is NaN.
         /// </summary>
@@ -478,6 +503,7 @@ namespace MathNet.Numerics.Statistics
         {
             return Variance(samples.Select(x => (double)x));
         }
+
 
         /// <summary>
         /// Evaluates the population variance from the full population provided as enumerable sequence, in a single pass without memoization.
@@ -687,6 +713,58 @@ namespace MathNet.Numerics.Statistics
         public static double Covariance(IEnumerable<float> samples1, IEnumerable<float> samples2)
         {
             return Covariance(samples1.Select(x => (double)x), samples2.Select(x => (double)x));
+        }
+
+        /// <summary>
+        /// Estimates the unbiased population covariance from the provided sample sequence in a single pass without memoization.
+        /// On a dataset of size N will use an N-1 normalizer (Bessel's correction).
+        /// Returns null if data has less than two entries.
+        /// </summary>
+        public static Matrix<double> Covariance(IEnumerable<Vector<double>> samples)
+        {
+            return MeanCovariance(samples).Covariance;
+        }
+
+        /// <summary>
+        /// Estimates the arithmetic sample mean and the unbiased population covariance from the provided samples in a single pass without memoization.
+        /// On a dataset of size N will use an N-1 normalizer (Bessel's correction).
+        /// Returns null for mean if data is empty and for covariance if data has less than two entries.
+        /// </summary>
+        /// <param name="samples">Sample stream, no sorting is assumed.</param>
+        public static (Vector<double> Mean, Matrix<double> Covariance) MeanCovariance(IEnumerable<Vector<double>> samples)
+        {
+            double n = 0.0;
+            Vector<double> prev = null;
+            Vector<double> mean = null;
+            Matrix<double> comoment = null;
+
+            foreach (var x in samples)
+            {
+                if (n == 0.0)
+                {
+                    prev = Vector<double>.Build.Dense(x.Count);
+                    mean = Vector<double>.Build.Dense(x.Count);
+                    comoment = Matrix<double>.Build.Dense(x.Count, x.Count);
+                }
+
+                n += 1.0;
+
+                mean.CopyTo(prev);
+                mean += (x - mean) / n;
+
+                // comoment += (x - mean)ᵀ · (x - prev)
+                for (int i = 0; i < x.Count; ++i)
+                {
+                    for (int j = 0; j < x.Count; ++j)
+                    {
+                        comoment[i, j] += (x[i] - mean[i]) * (x[j] - prev[j]);
+                    }
+                }
+            }
+
+            return (
+                n >= 1 ? mean : null,
+                n >= 2 ? comoment / (n - 1.0) : null);
         }
 
         /// <summary>

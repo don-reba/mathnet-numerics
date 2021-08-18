@@ -30,6 +30,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using MathNet.Numerics.LinearAlgebra;
 using Complex = System.Numerics.Complex;
 
 namespace MathNet.Numerics.Statistics
@@ -256,6 +257,16 @@ namespace MathNet.Numerics.Statistics
         public static double Mean(this IEnumerable<double?> data)
         {
             return StreamingStatistics.Mean(data.Where(d => d.HasValue).Select(d => d.Value));
+        }
+
+        /// <summary>
+        /// Estimates the arithmetic sample mean from the enumerable, in a single pass without memoization.
+        /// Returns null if data is empty.
+        /// </summary>
+        /// <param name="stream">Sample stream. No sorting is assumed. All samples must have the same dimensionality.</param>
+        public static Vector<double> Mean(this IEnumerable<Vector<double>> stream)
+        {
+            return StreamingStatistics.Mean(stream);
         }
 
         /// <summary>
@@ -671,6 +682,27 @@ namespace MathNet.Numerics.Statistics
         public static double Covariance(this IEnumerable<double?> samples1, IEnumerable<double?> samples2)
         {
             return StreamingStatistics.Covariance(samples1.Where(d => d.HasValue).Select(d => d.Value), samples2.Where(d => d.HasValue).Select(d => d.Value));
+        }
+
+        /// <summary>
+        /// Estimates the unbiased population covariance from the provided sample sequence in a single pass without memoization.
+        /// On a dataset of size N will use an N-1 normalizer (Bessel's correction).
+        /// Returns null if data has less than two entries.
+        /// </summary>
+        public static Matrix<double> Covariance(this IEnumerable<Vector<double>> samples)
+        {
+            return StreamingStatistics.Covariance(samples);
+        }
+
+        /// <summary>
+        /// Estimates the arithmetic sample mean and the unbiased population covariance from the provided samples in a single pass without memoization.
+        /// On a dataset of size N will use an N-1 normalizer (Bessel's correction).
+        /// Returns null for mean if data is empty and for covariance if data has less than two entries.
+        /// </summary>
+        /// <param name="samples">Sample stream, no sorting is assumed.</param>
+        public static (Vector<double> Mean, Matrix<double> Covariance) MeanCovariance(this IEnumerable<Vector<double>> samples)
+        {
+            return StreamingStatistics.MeanCovariance(samples);
         }
 
         /// <summary>

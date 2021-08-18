@@ -31,6 +31,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using MathNet.Numerics.Distributions;
+using MathNet.Numerics.LinearAlgebra;
 using MathNet.Numerics.Random;
 using MathNet.Numerics.TestData;
 using NUnit.Framework;
@@ -59,6 +60,19 @@ namespace MathNet.Numerics.UnitTests.StatisticsTests
             { "numacc4", new StatTestData("NIST.NumAcc4.dat") },
             { "meixner", new StatTestData("NIST.Meixner.dat") }
         };
+
+        private IEnumerable<Vector<T>> Vectorize<T>(IEnumerable<T> values, int dim) where T : struct, IEquatable<T>, IFormattable
+        {
+            int i = 0;
+            Vector<T> v = Vector<T>.Build.Dense(dim);
+            foreach (var x in values)
+            {
+                v[i] = x;
+                i = (i + 1) % dim;
+                if (i == 0)
+                    yield return v.Clone();
+            }
+        }
 
         [Test]
         public void ThrowsOnNullData()
@@ -128,6 +142,20 @@ namespace MathNet.Numerics.UnitTests.StatisticsTests
             Assert.That(() => new RunningStatistics(data), Throws.Exception);
             Assert.That(() => new RunningStatistics().PushRange(data), Throws.Exception);
 // ReSharper restore ExpressionIsAlwaysNull
+        }
+
+        [Test]
+        public void ThrowsOnNullVectorData()
+        {
+            Vector<double>[] data = null;
+
+            Assert.That(() => Statistics.Mean(data), Throws.Exception.TypeOf<NullReferenceException>());
+            Assert.That(() => Statistics.Covariance(data), Throws.Exception.TypeOf<NullReferenceException>());
+            Assert.That(() => Statistics.MeanCovariance(data), Throws.Exception.TypeOf<NullReferenceException>());
+
+            Assert.That(() => StreamingStatistics.Mean(data), Throws.Exception.TypeOf<NullReferenceException>());
+            Assert.That(() => StreamingStatistics.Covariance(data), Throws.Exception.TypeOf<NullReferenceException>());
+            Assert.That(() => StreamingStatistics.MeanCovariance(data), Throws.Exception.TypeOf<NullReferenceException>());
         }
 
         [Test]
@@ -204,6 +232,20 @@ namespace MathNet.Numerics.UnitTests.StatisticsTests
             Assert.That(() => new RunningStatistics(data).PopulationKurtosis, Throws.Nothing);
         }
 
+        [Test]
+        public void DoesNotThrowOnEmptyVectorData()
+        {
+            Vector<double>[] data = Array.Empty<Vector<double>>();
+
+            Assert.DoesNotThrow(() => Statistics.Mean(data));
+            Assert.DoesNotThrow(() => Statistics.Covariance(data));
+            Assert.DoesNotThrow(() => Statistics.MeanCovariance(data));
+
+            Assert.DoesNotThrow(() => StreamingStatistics.Mean(data));
+            Assert.DoesNotThrow(() => StreamingStatistics.Covariance(data));
+            Assert.DoesNotThrow(() => StreamingStatistics.MeanCovariance(data));
+        }
+
         [TestCase("lottery")]
         [TestCase("lew")]
         [TestCase("mavro")]
@@ -222,6 +264,10 @@ namespace MathNet.Numerics.UnitTests.StatisticsTests
             AssertHelpers.AlmostEqualRelative(data.Mean, ArrayStatistics.MeanVariance(data.Data).Item1, 14);
             AssertHelpers.AlmostEqualRelative(data.Mean, StreamingStatistics.MeanVariance(data.Data).Item1, 14);
             AssertHelpers.AlmostEqualRelative(data.Mean, new RunningStatistics(data.Data).Mean, 14);
+
+            var vectors = from x in data.Data select Vector<double>.Build.DenseOfArray(new double[] { x });
+            AssertHelpers.AlmostEqualRelative(data.Mean, StreamingStatistics.MeanCovariance(vectors).Mean[0], 14);
+            AssertHelpers.AlmostEqualRelative(data.Mean, StreamingStatistics.Mean(vectors)[0], 14);
         }
 
         [TestCase("lottery")]
@@ -270,6 +316,39 @@ namespace MathNet.Numerics.UnitTests.StatisticsTests
         {
             var data = _data[dataSet];
             AssertHelpers.AlmostEqualRelative(data.StandardDeviation, Statistics.StandardDeviation(data.DataWithNulls), digits);
+        }
+
+        [TestCase(
+            new[] {
+                346.0, 840.0,  36.33,
+                346.0, 850.0,  36.34,
+                346.0, 900.0,  36.35,
+                346.0, 910.0,  36.42,
+                346.0, 920.0,  36.55,
+                346.0, 930.0,  36.69,
+                346.0, 940.0,  36.71,
+                346.0, 950.0,  36.75,
+                346.0, 1000.0, 36.81,
+                346.0, 1010.0, 36.88 },
+            new[] { 346.0, 925.0, 36.583 },
+            new[] {
+                0.0, 0.0, 0.0,
+                0.0, 3050.0, 10.783333333333,
+                0.0, 10.783333333333, 0.044467777778 },
+            12)] // from R: beaver1[1:10, c('day', 'time', 'temp')]
+        public void ValidateVectorMeanCovariance(double[] sampleValues, double[] meanValues, double[] covarianceValues, int decimalPlaces)
+        {
+            var dim = (int)Math.Sqrt(covarianceValues.Length);
+            var samples = Vectorize(sampleValues, dim);
+            var mean = Vector<double>.Build.DenseOfArray(meanValues);
+            var covariance = Matrix<double>.Build.DenseOfRowMajor(dim, dim, covarianceValues);
+
+            var (calculatedMean, calculatedCovariance) = StreamingStatistics.MeanCovariance(samples);
+
+            AssertHelpers.AlmostEqual(mean, calculatedMean, decimalPlaces);
+            AssertHelpers.AlmostEqual(covariance, calculatedCovariance, decimalPlaces);
+
+            AssertHelpers.AlmostEqual(mean, StreamingStatistics.Mean(samples), decimalPlaces);
         }
 
         [Test]
@@ -834,6 +913,10 @@ namespace MathNet.Numerics.UnitTests.StatisticsTests
             AssertHelpers.AlmostEqualRelative(1e+9, new RunningStatistics(gaussian.Samples().Take(10000)).Mean, 10);
             AssertHelpers.AlmostEqualRelative(4d, new RunningStatistics(gaussian.Samples().Take(10000)).Variance, 0);
             AssertHelpers.AlmostEqualRelative(2d, new RunningStatistics(gaussian.Samples().Take(10000)).StandardDeviation, 1);
+
+            var vectors = from x in gaussian.Samples().Take(10000) select Vector<double>.Build.DenseOfArray(new double[] { x });
+            AssertHelpers.AlmostEqualRelative(1e+9, StreamingStatistics.Mean(vectors)[0], 10);
+            AssertHelpers.AlmostEqualRelative(4d, StreamingStatistics.Covariance(vectors)[0, 0], 0);
         }
 
         [TestCase("lottery")]
@@ -847,6 +930,9 @@ namespace MathNet.Numerics.UnitTests.StatisticsTests
             AssertHelpers.AlmostEqualRelative(Statistics.Variance(data.Data), Statistics.Covariance(data.Data, data.Data), 10);
             AssertHelpers.AlmostEqualRelative(ArrayStatistics.Variance(data.Data), ArrayStatistics.Covariance(data.Data, data.Data), 10);
             AssertHelpers.AlmostEqualRelative(StreamingStatistics.Variance(data.Data), StreamingStatistics.Covariance(data.Data, data.Data), 10);
+
+            var vectors = from x in data.Data select Vector<double>.Build.DenseOfArray(new double[] { x });
+            AssertHelpers.AlmostEqualRelative(StreamingStatistics.Variance(data.Data), StreamingStatistics.Covariance(vectors)[0, 0], 10);
         }
 
         [TestCase("lottery")]
@@ -962,6 +1048,16 @@ namespace MathNet.Numerics.UnitTests.StatisticsTests
         }
 
         [Test]
+        public void VectorMeanOfEmptyMustBeNull()
+        {
+            var empty = Array.Empty<Vector<double>>();
+            var nonEmpty = new Vector<double>[] { Vector<double>.Build.Dense(0) };
+
+            Assert.That(StreamingStatistics.Mean(empty), Is.Null);
+            Assert.That(StreamingStatistics.Mean(nonEmpty), Is.Not.Null);
+        }
+
+        [Test]
         public void RootMeanSquareOfEmptyMustBeNaN()
         {
             Assert.That(Statistics.RootMeanSquare(new double[0]), Is.NaN);
@@ -986,6 +1082,31 @@ namespace MathNet.Numerics.UnitTests.StatisticsTests
             Assert.That(StreamingStatistics.Variance(new[] { 2d, 3d }), Is.Not.NaN);
             Assert.That(new RunningStatistics(new[] { 2d }).Variance, Is.NaN);
             Assert.That(new RunningStatistics(new[] { 2d, 3d }).Variance, Is.Not.NaN);
+        }
+
+        [Test]
+        public void VectorCovarianceOfEmptyAndSingleMustBeEmpty()
+        {
+            var v = Vector<double>.Build.Dense(0);
+            var zeroValues = Array.Empty<Vector<double>>();
+            var oneValue = new Vector<double>[] { v };
+            var twoValues = new Vector<double>[] { v, v };
+
+            Assert.That(StreamingStatistics.Covariance(zeroValues), Is.Null);
+            Assert.That(StreamingStatistics.Covariance(oneValue), Is.Null);
+            Assert.That(StreamingStatistics.Covariance(twoValues), Is.Not.Null);
+        }
+
+        [Test]
+        public void SampleCovarianceOfZeroDimensionalVectorsMustBeZeroDimensional()
+        {
+            var v = Vector<double>.Build.Dense(0);
+            var samples = new[] { v, v };
+            var covariance = StreamingStatistics.Covariance(samples);
+
+            Assert.That(covariance, Is.Not.Null);
+            Assert.That(covariance.RowCount, Is.Zero);
+            Assert.That(covariance.ColumnCount, Is.Zero);
         }
 
         [Test]
